@@ -8,6 +8,7 @@ import RaceSelect from '@/components/RaceSelect';
 import RegionSelect from '@/components/RegionSelect';
 import GenerateButton from '@/components/GenerateButton';
 import ResultDialog from '@/components/ResultDialog';
+import { generateFantasyImage, regenerateImage } from '@/api';
 
 const Index = () => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -28,27 +29,32 @@ const Index = () => {
     setOriginalFile(null);
   }, []);
 
-  const generateImage = async (baseImage: string) => {
+  const generateImage = async (baseImage: string, isSpiciness = false) => {
     setIsLoading(true);
     setIsDialogOpen(true);
 
-    // Simulate AI generation - in production, this would call your AI API
-    // For now, we'll show a placeholder transformation
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    // In production, you would:
-    // 1. Send the baseImage to your AI backend
-    // 2. Include selectedRace and selectedRegion in the prompt
-    // 3. Return the generated image
-    
-    // For demo purposes, we'll use the original image
-    // Replace this with actual AI-generated image URL
-    setGeneratedImage(baseImage);
-    setIsLoading(false);
-    
-    toast.success('Your transformation is complete!', {
-      description: `You are now a ${selectedRace} from ${selectedRegion}`,
-    });
+    try {
+      const result = isSpiciness
+        ? await regenerateImage(baseImage, selectedRace, selectedRegion)
+        : await generateFantasyImage({ image: baseImage, race: selectedRace, region: selectedRegion });
+
+      if (result.success && result.image) {
+        setGeneratedImage(result.image);
+        toast.success('Your transformation is complete!', {
+          description: `You are now a ${selectedRace} from ${selectedRegion}`,
+        });
+      } else {
+        toast.error('Generation failed', {
+          description: result.error || 'Please try again',
+        });
+      }
+    } catch (error) {
+      toast.error('Something went wrong', {
+        description: error instanceof Error ? error.message : 'Please try again',
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleGenerate = () => {
@@ -77,7 +83,7 @@ const Index = () => {
   const handleAddSpiciness = () => {
     if (!generatedImage) return;
     toast.info('Adding more spice to your character...');
-    generateImage(generatedImage);
+    generateImage(generatedImage, true);
   };
 
   const handleRedo = () => {
