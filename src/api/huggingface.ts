@@ -1,9 +1,12 @@
+import { HfInference } from '@huggingface/inference';
 import type { ImageGenerationRequest, ImageGenerationResponse, HuggingFaceConfig } from './types';
 
 const DEFAULT_CONFIG: HuggingFaceConfig = {
-  baseUrl: import.meta.env.VITE_API_BASE_URL || '/api',
   model: 'black-forest-labs/FLUX.1-schnell',
 };
+
+// Initialize client - can work without token for free models with rate limits
+const hf = new HfInference(import.meta.env.VITE_HUGGINGFACE_TOKEN);
 
 /**
  * Build prompt for D&D character transformation
@@ -15,65 +18,80 @@ High fantasy art style, detailed, dramatic lighting, epic atmosphere.`;
 }
 
 /**
- * Generate a D&D fantasy image from user's photo
- * Currently a mock - replace with actual API call to your backend
+ * Convert base64 image to Blob
+ */
+function base64ToBlob(base64: string): Blob {
+  const base64Data = base64.replace(/^data:image\/\w+;base64,/, '');
+  const byteCharacters = atob(base64Data);
+  const byteNumbers = new Array(byteCharacters.length);
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNumbers);
+  return new Blob([byteArray], { type: 'image/png' });
+}
+
+/**
+ * Convert Blob to base64 string
+ */
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Generate a D&D fantasy image using text-to-image
+ * Note: FLUX models are text-to-image, not image-to-image
  */
 export async function generateFantasyImage(
   request: ImageGenerationRequest,
   config: HuggingFaceConfig = {}
 ): Promise<ImageGenerationResponse> {
-  const { baseUrl } = { ...DEFAULT_CONFIG, ...config };
+  const model = config.model || DEFAULT_CONFIG.model;
   const prompt = buildPrompt(request.race, request.region);
 
   console.log('Generating image with:', {
     race: request.race,
     region: request.region,
     prompt,
-    imageSize: request.image.length,
+    model,
   });
 
-  // TODO: Replace with actual API call to your backend
-  // Example implementation for when backend is ready:
-  /*
   try {
-    const response = await fetch(`${baseUrl}/generate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        image: request.image,
-        prompt,
-        model: config.model || DEFAULT_CONFIG.model,
-      }),
-    });
+    const result = await hf.textToImage({
+      model,
+      inputs: prompt,
+    }) as unknown;
 
-    if (!response.ok) {
-      const error = await response.json();
-      return { success: false, error: error.message || 'Generation failed' };
+    // Handle response - can be Blob or string depending on HF response
+    let base64Image: string;
+    if (result instanceof Blob) {
+      base64Image = await blobToBase64(result);
+    } else if (typeof result === 'string') {
+      base64Image = result.startsWith('data:') ? result : `data:image/png;base64,${result}`;
+    } else {
+      throw new Error('Unexpected response format from HuggingFace');
     }
-
-    const data = await response.json();
-    return { success: true, image: data.image };
+    
+    return {
+      success: true,
+      image: base64Image,
+    };
   } catch (error) {
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Network error' 
+    console.error('HuggingFace API error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Image generation failed',
     };
   }
-  */
-
-  // Mock response for now - simulates API delay
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
-  return {
-    success: true,
-    image: request.image, // Returns original image as placeholder
-  };
 }
 
 /**
- * Regenerate with an existing AI image as base (Add Spiciness)
+ * Regenerate with same settings (Add Spiciness)
  */
 export async function regenerateImage(
   generatedImage: string,
@@ -81,6 +99,7 @@ export async function regenerateImage(
   region: string,
   config: HuggingFaceConfig = {}
 ): Promise<ImageGenerationResponse> {
+  // For text-to-image models, we just generate a new image with the same prompt
   return generateFantasyImage(
     { image: generatedImage, race, region },
     config
