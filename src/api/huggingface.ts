@@ -2,7 +2,7 @@ import { InferenceClient } from '@huggingface/inference';
 import type { ImageGenerationRequest, ImageGenerationResponse, HuggingFaceConfig } from './types';
 
 const DEFAULT_CONFIG: HuggingFaceConfig = {
-  model: 'stabilityai/sdxl-turbo',
+  model: 'timbrooks/instruct-pix2pix',
 };
 
 // Initialize client with user-provided token
@@ -68,8 +68,6 @@ export async function generateFantasyImage(
       inputs: imageBlob,
       parameters: {
         prompt,
-        strength: 0.7,
-        guidance_scale: 7.5,
       },
     });
 
