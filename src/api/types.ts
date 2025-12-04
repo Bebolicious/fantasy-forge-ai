@@ -14,4 +14,5 @@ export interface HuggingFaceConfig {
   apiKey?: string;
   baseUrl?: string; // For self-hosted backend
   model?: string;
+  captionModel?: string;
 }
