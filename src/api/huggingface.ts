@@ -2,20 +2,12 @@ import { InferenceClient } from '@huggingface/inference';
 import type { ImageGenerationRequest, ImageGenerationResponse, HuggingFaceConfig } from './types';
 
 const DEFAULT_CONFIG: HuggingFaceConfig = {
-  model: 'timbrooks/instruct-pix2pix',
+  model: 'black-forest-labs/FLUX.1-dev',
+  captionModel: 'Salesforce/blip-image-captioning-large',
 };
 
 // Initialize client with user-provided token
 const client = new InferenceClient(import.meta.env.VITE_HUGGINGFACE_TOKEN);
-
-/**
- * Build prompt for D&D character transformation
- */
-export function buildPrompt(race: string, region: string): string {
-  return `Transform this person into a ${race} character from ${region} in a Dungeons & Dragons fantasy style. 
-The character should have distinctive ${race} features and wear clothing/armor appropriate for the ${region} region. 
-High fantasy art style, detailed, dramatic lighting, epic atmosphere.`;
-}
 
 /**
  * Convert base64 image to Blob
@@ -44,34 +36,63 @@ async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * Generate a D&D fantasy image using image-to-image transformation
+ * Get image caption/description using BLIP
+ */
+async function getImageCaption(imageBlob: Blob, captionModel: string): Promise<string> {
+  console.log('Getting image caption with:', captionModel);
+  
+  const result = await client.imageToText({
+    model: captionModel,
+    data: imageBlob,
+  });
+  
+  console.log('Image caption result:', result);
+  return result.generated_text || 'a person';
+}
+
+/**
+ * Build master prompt combining image description, race, and region
+ */
+function buildMasterPrompt(imageDescription: string, race: string, region: string): string {
+  return `A highly detailed fantasy portrait of ${imageDescription}, transformed into a ${race} from ${region} in Dungeons & Dragons style. 
+The character has distinctive ${race} racial features and wears clothing and armor appropriate for ${region}. 
+Epic fantasy art, dramatic lighting, intricate details, professional digital painting, 8k resolution, artstation quality.`;
+}
+
+/**
+ * Generate a D&D fantasy image using caption + text-to-image pipeline
  */
 export async function generateFantasyImage(
   request: ImageGenerationRequest,
   config: HuggingFaceConfig = {}
 ): Promise<ImageGenerationResponse> {
   const model = config.model || DEFAULT_CONFIG.model;
-  const prompt = buildPrompt(request.race, request.region);
+  const captionModel = config.captionModel || DEFAULT_CONFIG.captionModel;
 
-  console.log('Generating image with:', {
+  console.log('Starting image generation pipeline:', {
     race: request.race,
     region: request.region,
-    prompt,
     model,
+    captionModel,
   });
 
   try {
+    // Step 1: Convert uploaded image to text description
     const imageBlob = base64ToBlob(request.image);
+    const imageDescription = await getImageCaption(imageBlob, captionModel);
     
-    const result = await client.imageToImage({
+    // Step 2: Build master prompt
+    const masterPrompt = buildMasterPrompt(imageDescription, request.race, request.region);
+    console.log('Master prompt:', masterPrompt);
+    
+    // Step 3: Generate new image with FLUX
+    const result = await client.textToImage({
       model,
-      inputs: imageBlob,
-      parameters: {
-        prompt,
-      },
+      inputs: masterPrompt,
     });
 
-    const base64Image = await blobToBase64(result);
+    // Result is a Blob from textToImage
+    const base64Image = await blobToBase64(result as unknown as Blob);
     
     return {
       success: true,
@@ -87,7 +108,7 @@ export async function generateFantasyImage(
 }
 
 /**
- * Regenerate with same settings (Add Spiciness)
+ * Regenerate with same settings (Add Spiciness) - uses the generated image's description
  */
 export async function regenerateImage(
   generatedImage: string,
