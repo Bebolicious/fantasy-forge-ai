@@ -3,7 +3,6 @@ import type { ImageGenerationRequest, ImageGenerationResponse, HuggingFaceConfig
 
 const DEFAULT_CONFIG: HuggingFaceConfig = {
   model: 'black-forest-labs/FLUX.1-dev',
-  captionModel: 'Salesforce/blip-image-captioning-large',
 };
 
 // Initialize client with user-provided token
@@ -36,62 +35,40 @@ async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * Get image caption/description using BLIP
+ * Build prompt for D&D character transformation
  */
-async function getImageCaption(imageBlob: Blob, captionModel: string): Promise<string> {
-  console.log('Getting image caption with:', captionModel);
-  
-  const result = await client.imageToText({
-    model: captionModel,
-    data: imageBlob,
-  });
-  
-  console.log('Image caption result:', result);
-  return result.generated_text || 'a person';
-}
-
-/**
- * Build master prompt combining image description, race, and region
- */
-function buildMasterPrompt(imageDescription: string, race: string, region: string): string {
-  return `A highly detailed fantasy portrait of ${imageDescription}, transformed into a ${race} from ${region} in Dungeons & Dragons style. 
+function buildPrompt(race: string, region: string): string {
+  return `Transform this person into a ${race} character from ${region} in Dungeons & Dragons style. 
 The character has distinctive ${race} racial features and wears clothing and armor appropriate for ${region}. 
 Epic fantasy art, dramatic lighting, intricate details, professional digital painting, 8k resolution, artstation quality.`;
 }
 
 /**
- * Generate a D&D fantasy image using caption + text-to-image pipeline
+ * Generate a D&D fantasy image using FLUX image-to-image
  */
 export async function generateFantasyImage(
   request: ImageGenerationRequest,
   config: HuggingFaceConfig = {}
 ): Promise<ImageGenerationResponse> {
   const model = config.model || DEFAULT_CONFIG.model;
-  const captionModel = config.captionModel || DEFAULT_CONFIG.captionModel;
+  const prompt = buildPrompt(request.race, request.region);
 
-  console.log('Starting image generation pipeline:', {
+  console.log('Starting image-to-image generation:', {
     race: request.race,
     region: request.region,
     model,
-    captionModel,
+    prompt,
   });
 
   try {
-    // Step 1: Convert uploaded image to text description
     const imageBlob = base64ToBlob(request.image);
-    const imageDescription = await getImageCaption(imageBlob, captionModel);
     
-    // Step 2: Build master prompt
-    const masterPrompt = buildMasterPrompt(imageDescription, request.race, request.region);
-    console.log('Master prompt:', masterPrompt);
-    
-    // Step 3: Generate new image with FLUX
-    const result = await client.textToImage({
+    const result = await client.imageToImage({
       model,
-      inputs: masterPrompt,
+      inputs: imageBlob,
+      parameters: { prompt },
     });
 
-    // Result is a Blob from textToImage
     const base64Image = await blobToBase64(result as unknown as Blob);
     
     return {
