@@ -1,12 +1,12 @@
-import { HfInference } from '@huggingface/inference';
+import { InferenceClient } from '@huggingface/inference';
 import type { ImageGenerationRequest, ImageGenerationResponse, HuggingFaceConfig } from './types';
 
 const DEFAULT_CONFIG: HuggingFaceConfig = {
-  model: 'black-forest-labs/FLUX.1-schnell',
+  model: 'stabilityai/sdxl-turbo',
 };
 
-// Initialize client - can work without token for free models with rate limits
-const hf = new HfInference(import.meta.env.VITE_HUGGINGFACE_TOKEN);
+// Initialize client with user-provided token
+const client = new InferenceClient(import.meta.env.VITE_HUGGINGFACE_TOKEN);
 
 /**
  * Build prompt for D&D character transformation
@@ -44,8 +44,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * Generate a D&D fantasy image using text-to-image
- * Note: FLUX models are text-to-image, not image-to-image
+ * Generate a D&D fantasy image using image-to-image transformation
  */
 export async function generateFantasyImage(
   request: ImageGenerationRequest,
@@ -62,20 +61,19 @@ export async function generateFantasyImage(
   });
 
   try {
-    const result = await hf.textToImage({
+    const imageBlob = base64ToBlob(request.image);
+    
+    const result = await client.imageToImage({
       model,
-      inputs: prompt,
-    }) as unknown;
+      inputs: imageBlob,
+      parameters: {
+        prompt,
+        strength: 0.7,
+        guidance_scale: 7.5,
+      },
+    });
 
-    // Handle response - can be Blob or string depending on HF response
-    let base64Image: string;
-    if (result instanceof Blob) {
-      base64Image = await blobToBase64(result);
-    } else if (typeof result === 'string') {
-      base64Image = result.startsWith('data:') ? result : `data:image/png;base64,${result}`;
-    } else {
-      throw new Error('Unexpected response format from HuggingFace');
-    }
+    const base64Image = await blobToBase64(result);
     
     return {
       success: true,
@@ -99,7 +97,6 @@ export async function regenerateImage(
   region: string,
   config: HuggingFaceConfig = {}
 ): Promise<ImageGenerationResponse> {
-  // For text-to-image models, we just generate a new image with the same prompt
   return generateFantasyImage(
     { image: generatedImage, race, region },
     config
